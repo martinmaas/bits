@@ -122,6 +122,13 @@ def shutdown_spark_instances():
 			if (c['process'].poll() == None):
 				all_done = False
 		time.sleep(0.01)
+
+	if args.logs:
+		print '> Trying to extract Spark logs...'
+		try:
+			extract_spark_logs(rundir + '/master-' + cluster_info['master_node'] + '/stderr')
+		except Exception as e:
+			print '> Extracting Spark logs failed (' + str(e) + ')!'
 	print '> DONE'	
 
 def do_start():
@@ -190,6 +197,7 @@ def do_start():
 
 	cluster_info['master_ip'] = ip_addresses[master_node]
 	cluster_info['master_port'] = spark_master_port
+	cluster_info['master_node'] = master_node
 
 	# Step II: Launch Spark Workers
 	print '> Launching Spark worker nodes'
@@ -221,9 +229,6 @@ def do_start():
 
 		cluster_info['workers'].append({'ip': ip_addresses[node], 'node': node})
 
-	# When exiting, make sure all children are terminated cleanly
-	atexit.register(shutdown_spark_instances)
-
 	print '>'
 	print '> Waiting for all Workers to finish starting up...'
 	unfinished_nodes = worker_nodes
@@ -253,8 +258,6 @@ def do_start():
 		print '> WAITING FOR WORKLOAD TO TERMINATE'
 		while True:
 			if (job.poll() != None):
-				if args.logs:
-					extract_spark_logs(rundir + '/master-' + master_node + '/stderr')
 				sys.exit(0)
 			time.sleep(0.5)
 	else:
@@ -323,7 +326,7 @@ def extract_spark_logs(master_err):
 	source_dir = spark_work + '/' + app
 	dest_dir = rundir + '/spark_logs'
 
-	print '> Copying spark logs from ' + source_dir + ' to ' + dest_dir + '...'
+	print '> Copying spark logs from ' + source_dir + ' to ' + dest_dir
 	shutil.copytree(source_dir, dest_dir, ignore=shutil.ignore_patterns('*.jar'))
 	print '> Finished copying!'
 	print '>'
