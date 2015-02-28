@@ -142,6 +142,11 @@ def do_start():
 	subprocess.call(['ln', '-s', '-f', '-T', rundir, workdir + '/latest'])
 
 	nodelist = get_slurm_nodelist()
+
+	if (len(nodelist) < 2 + (1 if args.workload else 0)):
+		print '[ERROR] Need more Spark nodes!'
+		sys.exit(1)
+
 	master_node = nodelist[0]
 	worker_start_index = 1
 	if args.workload != 'none':
@@ -339,10 +344,15 @@ parser.add_argument('--workload', nargs='?', metavar='NAME', default='none', \
 	help='if set, run the Spark workload described by NAME')
 parser.add_argument('--logs', action='store_true', default=False, \
 	help='copy the Spark executor logs into work directory')
-parser.add_argument('--hooks', nargs='?', metavar='FILE', default='none', \
+parser.add_argument('--hooks', nargs=1, metavar='FILE', default=None, \
 	help='if set, defines a Python file with custom hooks to call')
+parser.add_argument('--java_args', nargs=1, metavar='ARGS', default=None, \
+	help='arguments to pass to Spark through JAVA_OPTS. If they start with a -, add a space at the start')
 
 args = parser.parse_args()
+
+if args.java_args:
+	java_opts += ' ' + args.java_args[0]
 
 print '> ================================================================================'
 print '> SPARK RUN SCRIPT FOR FIREBOX-0 CLUSTER (VERSION ' + str(version) + ')'
@@ -367,8 +377,8 @@ print '> COMMAND = ' + str(args.action)
 print '> COPY SPARK LOGS = ' + str(args.logs)
 
 if args.hooks:
-	print '> CUSTOM HOOKS FILE = ' + args.hooks
-	execfile(args.hooks)
+	print '> CUSTOM HOOKS FILE = ' + args.hooks[0]
+	execfile(args.hooks[0])
 	hooks = Hooks(cluster_info)
 
 	if hooks.start_workload:
