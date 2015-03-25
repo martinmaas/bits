@@ -24,9 +24,13 @@ import json
 
 run_timestamp = time.time()
 
+hooks = None
+
 # -------------------------------------------------------------------------------------------------
 
 version = '0.1'
+
+srcdir = os.path.abspath(os.path.dirname(__file__))
 
 outdir = '/nscratch/' + getpass.getuser() + '/cassandra'
 workdir = os.getcwd() + '/work'
@@ -35,7 +39,7 @@ rundir = workdir + '/cassandra-' +  datetime.datetime.fromtimestamp(run_timestam
 
 instance_json = rundir + '/cassandra.json'
 
-network_if = 'eth0'
+network_if = 'eth2'
 
 cassandra_version = '1.0.6'
 
@@ -77,7 +81,7 @@ def get_slurm_nodelist():
 # Return list of the Ip addresses for the chosen network_if on all nodes in nodelist
 def get_ip_addresses(nodelist):
 	results = subprocess.check_output( \
-		['srun', '--nodelist=' + ','.join(nodelist), 'bash', '../common/get_ip_address.sh', \
+		['srun', '--nodelist=' + ','.join(nodelist), 'bash', srcdir + '/../../common/get_ip_address.sh', \
 		network_if], universal_newlines=True)
 	json_str = '[' + ','.join(results.splitlines()) + ']'
 	raw_data = json.loads(json_str)
@@ -144,6 +148,11 @@ def shutdown_cassandra_instances():
 def do_start():
 	nodelist = get_slurm_nodelist()
 	print '> Running cassandra on nodes: ' + ', '.join(nodelist)
+
+	make_dir(rundir)
+
+	if (hooks and hasattr(hooks, 'pre_start')):
+		hooks.pre_start()
 
 	confdir = outdir + '/config'
 	print '> Configuration directory: ' + confdir
@@ -233,9 +242,13 @@ def do_start():
 		myconfdir = confdir + '/' + node + '/conf'
 
 		srun_cmd = ['srun', '--nodelist=' + node, '-N1']
-		srun_cmd += ['bash', 'run_cassandra.sh']
+		srun_cmd += ['bash', srcdir + '/run_cassandra.sh']
 
 		myenv = {'CASSANDRA_HOME': cassandra_home, 'CASSANDRA_CONF': myconfdir}
+
+		if args.java_args:
+			myenv['JVM_OPTS'] = ' ' + args.java_args[0]
+
 		myenv.update(os.environ)
 
 		myrundir = rundir + '/' + node
@@ -286,6 +299,10 @@ def do_start():
 
 parser = argparse.ArgumentParser(description='Run script for Cassandra on FireBox-0 cluster.')
 parser.add_argument('action', nargs=1, help='the action to perform (setup|start|stop)')
+parser.add_argument('--hooks', nargs=1, metavar='FILE', default=None, \
+	help='if set, defines a Python file with custom hooks to call')
+parser.add_argument('--java_args', nargs=1, metavar='ARGS', default=None, \
+	help='arguments to pass to Spark through JAVA_OPTS. If they start with a -, add a space at the start')
 
 args = parser.parse_args()
 
@@ -307,6 +324,14 @@ print '>'
 if (not 'SLURM_NODELIST' in os.environ) or (not os.environ['SLURM_NODELIST']):
 	print '[ERROR] Need to run script within SLURM allocation'
 	exit(1)
+
+if args.hooks:
+	print '> CUSTOM HOOKS FILE = ' + args.hooks[0]
+	execfile(args.hooks[0])
+	hooks = Hooks({})
+
+	if hasattr(hooks, 'pre_start'):
+		print '> - FOUND HOOK: pre_start'
 
 print '> COMMAND = ' + str(args.action)
 

@@ -26,19 +26,37 @@ run_timestamp = time.time()
 
 # -------------------------------------------------------------------------------------------------
 
+parser = argparse.ArgumentParser(description='Run script for YCSB on FireBox-0 cluster.')
+parser.add_argument('action', nargs=1, help='the action to perform (setup)')
+parser.add_argument('--cassandra', nargs=1, metavar='FILE', \
+	help='run against cassandra, using instance described by FILE')
+parser.add_argument('--ycsb', metavar='FILE', default='', \
+	help='override the YCSB version to run')
+parser.add_argument('--operations', metavar='N', default=1000, \
+	help='number of operations to run')
+parser.add_argument('--records', metavar='N', default=100000, \
+	help='number of records to produce')
+
+args = parser.parse_args()
+
+# -------------------------------------------------------------------------------------------------
+
 version = '0.1'
 
 modules = ['cassandra', 'core', 'distribution']
 
 workdir = os.getcwd() + '/work'
-srcdir = workdir + '/src'
+srcdir = '/nscratch/' + getpass.getuser() + '/YCSB'
 
 rundir = workdir + '/ycsb-' +  datetime.datetime.fromtimestamp(run_timestamp). \
         strftime('%Y-%m-%d-%H-%M-%S')
 
 git_url = 'git@github.com:brianfrankcooper/YCSB.git'
 
-print_vars = ['git_url']
+opcount = int(args.operations)
+reccount = int(args.records)
+
+print_vars = ['git_url', 'opcount', 'reccount']
 
 # -------------------------------------------------------------------------------------------------
 
@@ -65,6 +83,7 @@ def do_setup():
 	else:
 		print '> Cloning YCSB git repository (' + git_url + ')...'
 		print '> Note: Enter SSH credentials as necessary'
+		make_dir(srcdir)
 		with open(workdir + '/git.log', 'w') as fout:
 			p = subprocess.Popen(['git', 'clone', git_url], cwd=srcdir, \
 				stdin=subprocess.PIPE, stdout=fout)
@@ -109,17 +128,17 @@ def do_setup():
 # Set up required tables for Cassandra
 def prepare_ycsb_tables(cassandra_instance):
 	print '> Deleting old tables'
-	subprocess.call([cassandra_instance['cli-path'], \
+	subprocess.call(['srun', '-N1', cassandra_instance['cli-path'], \
 		'-h', cassandra_instance['nodes'][0], \
 		'-p', '9160', \
-		'-f', os.getcwd() + '/cassandra-reset.cql' \
+		'-f', os.path.dirname(os.path.abspath(__file__)) + '/cassandra-reset.cql' \
 	])
 
 	print '> Setting up required tables...'
-	subprocess.call([cassandra_instance['cli-path'], \
+	subprocess.call(['srun', '-N1', cassandra_instance['cli-path'], \
 		'-h', cassandra_instance['nodes'][0], \
 		'-p', '9160', \
-		'-f', os.getcwd() + '/cassandra-ycsb.cql' \
+		'-f', os.path.dirname(os.path.abspath(__file__)) + '/cassandra-ycsb.cql' \
 	])
 	print '> Finished setting up tables'
 	print '>'
@@ -157,11 +176,16 @@ def run_ycsb(action):
 
 		ycsb_workload = 'workloads/workloada'
 		ycsb_properties = { \
-			'recordcount':'100000', \
-			'operationcount':'10000', \
+			'recordcount':str(reccount), \
+			'operationcount':str(opcount), \
+			'threadcount':str(len(cassandra_instance['nodes'])), \
 			'hosts':','.join(cassandra_instance['nodes']), \
 			'cassandra.connectionretries':'10', \
 			'cassandra.operationretries':'10', \
+			'measurementtype':'timeseries', \
+			'timeseries.granularity':'10', \
+			'hvmsteering':'steer', \
+			'hvmsteering.nodes':str(len(cassandra_instance['nodes'])) \
 		}
 
 		print '> YCSB Properties:'
@@ -203,13 +227,6 @@ def run_ycsb(action):
 
 # -------------------------------------------------------------------------------------------------
 
-parser = argparse.ArgumentParser(description='Run script for YCSB on FireBox-0 cluster.')
-parser.add_argument('action', nargs=1, help='the action to perform (setup)')
-parser.add_argument('--cassandra', nargs=1, metavar='FILE', \
-	help='run against cassandra, using instance described by FILE')
-
-args = parser.parse_args()
-
 print '> ================================================================================'
 print '> YCSB RUN SCRIPT FOR FIREBOX-0 CLUSTER (VERSION ' + str(version) + ')'
 print '> ================================================================================'
@@ -219,9 +236,12 @@ git_rev = subprocess.check_output(['git', 'rev-parse', 'HEAD'])
 print '> GIT revision: ' + git_rev.replace('\n','')
 print '>'
 
+if args.ycsb != "":
+	srcdir = args.ycsb
+
 print '> Constants:'
 for v in print_vars:
-        print '> ' + v + '=' + globals()[v]
+        print '> ' + str(v) + '=' + str(globals()[v])
 
 print '>'
 

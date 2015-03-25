@@ -25,8 +25,28 @@ import sys
 
 run_timestamp = time.time()
 
+hooks = None
+
 # -------------------------------------------------------------------------------------------------
 
+parser = argparse.ArgumentParser(description='Run script for Spark on FireBox-0 cluster.')
+parser.add_argument('action', nargs=1, help='the action to perform (setup|start|stop)')
+parser.add_argument('--workload', nargs='?', metavar='NAME', default='none', \
+	help='if set, run the Spark workload described by NAME')
+parser.add_argument('--logs', action='store_true', default=False, \
+	help='copy the Spark executor logs into work directory')
+parser.add_argument('--hooks', nargs=1, metavar='FILE', default=None, \
+	help='if set, defines a Python file with custom hooks to call')
+parser.add_argument('--java_args', nargs=1, metavar='ARGS', default=None, \
+	help='arguments to pass to Spark through JAVA_OPTS. If they start with a -, add a space at the start')
+parser.add_argument('--spark_home', nargs='?', metavar='DIR', default='none', \
+	help='use the Spark copy in the given directory')
+parser.add_argument('--spark_version', nargs='?', metavar='VERSION', default='none', \
+	help='override the used spark version')
+
+args = parser.parse_args()
+
+# -------------------------------------------------------------------------------------------------
 version = '0.1'
 
 srcdir = os.path.abspath(os.path.dirname(__file__))
@@ -40,7 +60,7 @@ instance_json = rundir + '/spark.json'
 
 network_if = 'eth2'
 
-spark_version = '1.1.0'
+spark_version = '1.1.0' if not args.spark_version else args.spark_version
 
 spark_master_port = '7077'
 
@@ -49,7 +69,8 @@ spark_executor_memory = '32G'
 # For now, use the Hadoop-2.4 version (as this is what the cluster is running).
 spark_url = 'http://d3kbcqa49mib13.cloudfront.net/spark-${VERSION}-bin-hadoop2.4.tgz'
 
-spark_home = outdir + '/spark-1.1.0-bin-hd2.3'
+spark_home = outdir + '/spark-1.1.0-bin-hd2.3' if not args.spark_home else args.spark_home
+
 spark_work = spark_home + '/work'
 
 # Workload specific
@@ -57,15 +78,18 @@ workload_config = {}
 workload_config['WikipediaPageRank'] = { \
 	'args' : ['hdfs://10.10.49.98/user/maas/freebase-wex-2010-07-05-articles.tsv', '100', '256', 'true'], \
 	'class' : 'org.apache.spark.examples.bagel.WikipediaPageRank', \
-	'file' : spark_home + '/lib/spark-examples-1.1.0-hadoop2.3.0.jar' \
+	'file' : spark_home + '/lib/spark-examples-' + spark_version + '-hadoop2.3.0.jar' \
 	}
 workload_config['SparkPi'] = { \
 	'args' : ['10'], \
 	'class' : 'org.apache.spark.examples.SparkPi', \
-	'file' : spark_home + '/lib/spark-examples-1.1.0-hadoop2.3.0.jar' \
+	'file' : spark_home + '/lib/spark-examples-' + spark_version + '-hadoop2.3.0.jar' \
 	}
 
 java_opts = '-XX:+PrintGC -XX:+PrintGCDetails -XX:+PrintGCTimeStamps'
+
+if args.java_args:
+	java_opts += ' ' + args.java_args[0]
 
 print_vars = ['spark_version', 'spark_home', 'spark_master_port', 'network_if', 'java_opts']
 
@@ -139,6 +163,7 @@ def do_start():
 
 	# Create symlink for latest run
 	make_dir(workdir)
+	make_dir(rundir)
 	subprocess.call(['ln', '-s', '-f', '-T', rundir, workdir + '/latest'])
 
 	nodelist = get_slurm_nodelist()
@@ -163,6 +188,9 @@ def do_start():
 	ip_addresses = get_ip_addresses(nodelist)
 	print '> IPs: ' + ', '.join(ip_addresses.values())
 	print '>'
+
+	if (hooks and hasattr(hooks, 'pre_start')):
+		hooks.pre_start()
 
 	# Step I: Launch Spark Master
 	print '> Launching Spark master on node: ' + master_node
@@ -266,7 +294,7 @@ def do_start():
 				sys.exit(0)
 			time.sleep(0.5)
 	else:
-		# Write a JSON description of the Cassandra instance that can be used by others.
+		# Write a JSON description of the Spark instance that can be used by others.
 		print '> Writing instance description to ' + instance_json
 
 		json_str = json.dumps(spark_instance)
@@ -291,13 +319,14 @@ def run_workload(workload, spark_instance, node):
 	print '>'
 
 	print '> Launching Spark workload on ' + node
+	print '> Workload file: ' + workload_config[workload]['file']
 
 	srun_cmd = ['srun', '--nodelist=' + node, '-N1']
 	srun_cmd += ['bash', './bin/spark-submit']
 	srun_cmd += ['--class', workload_config[workload]['class']]
 	srun_cmd += ['--master', 'spark://' + spark_instance['master_ip'] + ':' + spark_instance['master_port']]
 	srun_cmd += ['--executor-memory', '32G']
-	srun_cmd += ['--total-executor-cores', '16']
+	#srun_cmd += ['--total-executor-cores', '16']
 	srun_cmd += [workload_config[workload]['file']]
 	srun_cmd += workload_config[workload]['args']
 
@@ -316,7 +345,7 @@ def run_workload(workload, spark_instance, node):
 	spark_instances[node] = {'process': p, 'out': myoutfile, 'err': myerrfile, 'type': 'job'}
 	print '> Workload ' + workload + ' is running...'
 
-	if (hooks.start_workload):
+	if (hooks and hasattr(hooks, 'start_workload')):
 		hooks.start_workload()
 
 	return p
@@ -337,22 +366,6 @@ def extract_spark_logs(master_err):
 	print '>'
 
 # -------------------------------------------------------------------------------------------------
-
-parser = argparse.ArgumentParser(description='Run script for Spark on FireBox-0 cluster.')
-parser.add_argument('action', nargs=1, help='the action to perform (setup|start|stop)')
-parser.add_argument('--workload', nargs='?', metavar='NAME', default='none', \
-	help='if set, run the Spark workload described by NAME')
-parser.add_argument('--logs', action='store_true', default=False, \
-	help='copy the Spark executor logs into work directory')
-parser.add_argument('--hooks', nargs=1, metavar='FILE', default=None, \
-	help='if set, defines a Python file with custom hooks to call')
-parser.add_argument('--java_args', nargs=1, metavar='ARGS', default=None, \
-	help='arguments to pass to Spark through JAVA_OPTS. If they start with a -, add a space at the start')
-
-args = parser.parse_args()
-
-if args.java_args:
-	java_opts += ' ' + args.java_args[0]
 
 print '> ================================================================================'
 print '> SPARK RUN SCRIPT FOR FIREBOX-0 CLUSTER (VERSION ' + str(version) + ')'
@@ -381,8 +394,10 @@ if args.hooks:
 	execfile(args.hooks[0])
 	hooks = Hooks(cluster_info)
 
-	if hooks.start_workload:
+	if hasattr(hooks, 'start_workload'):
 		print '> - FOUND HOOK: start_workload'
+	if hasattr(hooks, 'pre_start'):
+		print '> - FOUND HOOK: pre_start'
 	
 print '>'
 
