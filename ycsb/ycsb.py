@@ -36,6 +36,12 @@ parser.add_argument('--operations', metavar='N', default=1000, \
 	help='number of operations to run')
 parser.add_argument('--records', metavar='N', default=100000, \
 	help='number of records to produce')
+parser.add_argument('--threadfactor', metavar='N', default=1, \
+	help='number of client threads per node')
+parser.add_argument('--java_args', nargs=1, metavar='ARGS', default=None, \
+	help='arguments to pass to Spark through JAVA_OPTS. If they start with a -, add a space at the start')
+parser.add_argument('--properties', nargs=1, metavar='PROPS', default='', \
+	help='additional properties, format is p1=a,p2=b,...')
 
 args = parser.parse_args()
 
@@ -178,15 +184,18 @@ def run_ycsb(action):
 		ycsb_properties = { \
 			'recordcount':str(reccount), \
 			'operationcount':str(opcount), \
-			'threadcount':str(len(cassandra_instance['nodes'])), \
+			'threadcount':str(len(cassandra_instance['nodes'])*int(args.threadfactor)), \
 			'hosts':','.join(cassandra_instance['nodes']), \
 			'cassandra.connectionretries':'10', \
 			'cassandra.operationretries':'10', \
 			'measurementtype':'timeseries', \
-			'timeseries.granularity':'10', \
-			'hvmsteering':'steer', \
-			'hvmsteering.nodes':str(len(cassandra_instance['nodes'])) \
+			'timeseries.granularity':'10' \
 		}
+
+		if args.properties != '':
+			for p in args.properties[0].split(','):
+				pv = p.split('=')
+				ycsb_properties[pv[0]] = pv[1]
 
 		print '> YCSB Properties:'
 		for k,v in ycsb_properties.items():
@@ -196,7 +205,7 @@ def run_ycsb(action):
 		subprocess.call(['ln', '-s', '-f', '-T', myrundir, workdir + '/latest-' + action])
 
                 srun_cmd = ['srun', '-N1', 'bin/ycsb']
-		srun_cmd += [action, 'cassandra-10']
+		srun_cmd += [action, 'cassandra-10', '-s']
                 srun_cmd += ['-P', ycsb_workload]
 
 		for k,v in ycsb_properties.items():
@@ -205,11 +214,18 @@ def run_ycsb(action):
                 myoutfile = myrundir + '/stdout'
                 myerrfile = myrundir + '/stderr'
 
+		myenv = {}
+
+		if args.java_args:
+			myenv['YCSB_JVM_OPTS'] = ' ' + args.java_args[0]
+
+		myenv.update(os.environ)
+
 		print '> Running YCSB...'
 		print '> Command line: ' + ' '.join(srun_cmd)
                 fout = open(myoutfile, 'w')
                 ferr = open(myerrfile, 'w')
-                p = subprocess.Popen(srun_cmd, stdout=fout, stderr=ferr, cwd=srcdir + '/YCSB')
+                p = subprocess.Popen(srun_cmd, stdout=fout, stderr=ferr, cwd=srcdir + '/YCSB', env=myenv)
 
 		def terminate_ycsb():
 			if p.poll() == None:

@@ -237,7 +237,7 @@ def do_start():
 	# Create symlink for latest run
 	subprocess.call(['ln', '-s', '-f', '-T', rundir, workdir + '/latest'])
 
-	for node in nodelist:
+	for (idx,node) in enumerate(nodelist):
 		print '> Launching Cassandra instance on ' + node
 		myconfdir = confdir + '/' + node + '/conf'
 
@@ -247,7 +247,7 @@ def do_start():
 		myenv = {'CASSANDRA_HOME': cassandra_home, 'CASSANDRA_CONF': myconfdir}
 
 		if args.java_args:
-			myenv['JVM_OPTS'] = ' ' + args.java_args[0]
+			myenv['JVM_OPTS'] = ' ' + args.java_args[0].replace('%ID%', str(idx))
 
 		myenv.update(os.environ)
 
@@ -281,8 +281,13 @@ def do_start():
 
 	# Write a JSON description of the Cassandra instance that can be used by others.
 	print '> Writing instance description to ' + instance_json
+
+	cnodes = []
+	for n in nodelist:
+		cnodes.append(ip_addresses[n])
+
 	cassandra_instance = { \
-		'nodes' : ip_addresses.values(), \
+		'nodes' : cnodes, \
 		'cli-path' : cassandra_home + '/bin/cassandra-cli', \
 	}
 
