@@ -81,7 +81,7 @@ def get_slurm_nodelist():
 # Return list of the Ip addresses for the chosen network_if on all nodes in nodelist
 def get_ip_addresses(nodelist):
 	results = subprocess.check_output( \
-		['srun', '--nodelist=' + ','.join(nodelist), 'bash', srcdir + '/../../common/get_ip_address.sh', \
+		['srun', '--nodelist=' + ','.join(nodelist), 'bash', srcdir + '/../../../common/get_ip_address.sh', \
 		network_if], universal_newlines=True)
 	json_str = '[' + ','.join(results.splitlines()) + ']'
 	raw_data = json.loads(json_str)
