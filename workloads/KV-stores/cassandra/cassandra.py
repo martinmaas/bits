@@ -62,7 +62,7 @@ data_dir = local_dir + '/data'
 logfile = local_dir + '/system.log'
 
 print_vars = ['local_dir', 'saved_caches_dir', 'commitlog_dir', 'data_dir', 'logfile', \
-	'cassandra_version']
+	'cassandra_version', 'cassandra_home']
 
 # -------------------------------------------------------------------------------------------------
 
@@ -308,6 +308,8 @@ parser.add_argument('--hooks', nargs=1, metavar='FILE', default=None, \
 	help='if set, defines a Python file with custom hooks to call')
 parser.add_argument('--java_args', nargs=1, metavar='ARGS', default=None, \
 	help='arguments to pass to Spark through JAVA_OPTS. If they start with a -, add a space at the start')
+parser.add_argument('--cassandra', metavar='DIR', default=None, \
+	help='override Cassandra source path')
 
 args = parser.parse_args()
 
@@ -319,6 +321,9 @@ print '>'
 git_rev = subprocess.check_output(['git', 'rev-parse', 'HEAD'])
 print '> GIT revision: ' + git_rev.replace('\n','')
 print '>'
+
+if args.cassandra:
+	cassandra_home = args.cassandra
 
 print '> Constants:'
 for v in print_vars:

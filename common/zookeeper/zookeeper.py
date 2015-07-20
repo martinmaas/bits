@@ -197,11 +197,16 @@ def do_start():
         # Create symlink for latest run
         subprocess.call(['ln', '-s', '-f', '-T', rundir, workdir + '/latest'])
 
+	if args.zookeeper != '':
+		zookeeper_dir = args.zookeeper
+	else:
+		zookeeper_dir = zookeeper_path
+
 	for node in zookeeper_nodes:
 		print '> Launching Zookeeper on ' + node
 
 		srun_cmd = ['ssh', 'f' + node]
-		srun_cmd += [zookeeper_path + '/bin/zkServer.sh', 'start']
+		srun_cmd += [zookeeper_dir + '/bin/zkServer.sh', 'start']
 		srun_cmd += [zookeeper_path + '/../conf/zookeeper' + \
                             str(nodes_hash[node]) + '.cfg']
 
@@ -230,6 +235,8 @@ def do_start():
 
 parser = argparse.ArgumentParser(description='Run script for Zookeeper on FireBox-0 cluster.')
 parser.add_argument('action', nargs=1, help='the action to perform (setup|start|stop)')
+parser.add_argument('--zookeeper', metavar='FILE', default='', \
+        help='override the Zookeeper version to run')
 
 args = parser.parse_args()
 
